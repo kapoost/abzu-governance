@@ -1,0 +1,28 @@
+# Fly.io deployment for abzu-governance.
+# AdCP campaign-governance agent (specialism: governance-spend-authority).
+# Stateful: in-memory plan + audit store; restart = lost state.
+# Operator re-syncs plans on cold start.
+
+app = "abzu-governance"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  AGENT_NAME = "abzu-governance"
+  DEFAULT_MODE = "enforce"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # governance state in-memory: don't scale to zero, restart wipes plans
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"  # bun + @adcp/sdk: OOM at 256mb (kernel SIGKILL during JIT warmup)
+  cpu_kind = "shared"
+  cpus = 1
