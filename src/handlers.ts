@@ -9,7 +9,7 @@ import type {
   SyncPlansRequest,
   SyncPlansResponse,
 } from '@adcp/sdk';
-import { evaluateBudget, verdictFromFindings, type Finding } from './policies/budget.ts';
+import { evaluateBudget, evaluateCustomPolicies, verdictFromFindings, type Finding } from './policies/budget.ts';
 import type { GovernanceMode, PlanStoreAdapter } from './store.ts';
 
 export type HandlerOptions = {
@@ -95,7 +95,10 @@ export function buildHandlers(options: HandlerOptions) {
       };
     }
 
-    const findings = evaluateBudget(plan, params);
+    const findings = [
+      ...evaluateBudget(plan, params),
+      ...evaluateCustomPolicies(plan, params),
+    ];
     const policyVerdict = verdictFromFindings(findings);
     const verdict = applyMode(defaultMode, policyVerdict);
     await store.recordCheck(params.plan_id, checkId, params, verdict, findings.map((f) => ({
@@ -123,7 +126,9 @@ export function buildHandlers(options: HandlerOptions) {
       findings: findingsToResponse(findings),
       mode: defaultMode,
       governance_context: mintGovernanceContext(params.plan_id, checkId, ts),
-      categories_evaluated: ['budget_compliance'],
+      categories_evaluated: Array.from(new Set(findings.map((f) => f.category_id))).length > 0
+        ? Array.from(new Set(findings.map((f) => f.category_id)))
+        : ['budget_compliance'],
       policies_evaluated: findings.map((f) => f.policy_id ?? 'unknown').filter(Boolean),
       ...(verdict !== 'denied' ? { expires_at: expiresAt } : {}),
       ...(conditions ? { conditions } : {}),

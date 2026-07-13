@@ -116,6 +116,80 @@ export function evaluateBudget(plan: PlanRecord, request: CheckGovernanceRequest
   return findings;
 }
 
+/**
+ * Evaluate `plan.custom_policies[]` against the check payload. 3.1.2
+ * governance-spend-authority/conditional_approval registers a plan
+ * carrying `custom_policies` (e.g. `ctv_weekly_reporting must`,
+ * `ugc_brand_safety must`) that the storyboard expects to surface as
+ * conditions on any buy the plan otherwise fits within budget. We
+ * emit each declared policy as a warning finding when the check
+ * payload actually carries packages the policy could apply to; this
+ * pushes the verdict from `approved` → `conditions` while keeping the
+ * per-policy detail on the wire for the buyer to acknowledge.
+ *
+ * Heuristic for "applies": keyword match between the policy_id and any
+ * package.product_id in the payload. `ctv_weekly_reporting` fires on
+ * any `sports_ctv_q2`-shaped product; `ugc_brand_safety` fires on any
+ * `native_ugc_feed`-shaped product; policies with `_default` or `_all`
+ * suffix apply unconditionally. This is intentionally minimal — real
+ * governance adopters wire product-taxonomy classifiers in place of
+ * substring matching.
+ */
+export function evaluateCustomPolicies(plan: PlanRecord, request: CheckGovernanceRequest): Finding[] {
+  const custom = (plan as { custom_policies?: ReadonlyArray<{
+    policy_id?: string;
+    enforcement?: 'must' | 'should' | 'may';
+    policy?: string;
+  }> }).custom_policies;
+  if (!Array.isArray(custom) || custom.length === 0) return [];
+
+  const payload = request.payload as
+    | {
+        packages?: ReadonlyArray<{ product_id?: string }>;
+        // create_media_buy top-level product_ids alternative
+        product_ids?: ReadonlyArray<string>;
+      }
+    | undefined;
+  const productIds: string[] = [];
+  if (Array.isArray(payload?.packages)) {
+    for (const pkg of payload!.packages) {
+      if (typeof pkg?.product_id === 'string') productIds.push(pkg.product_id.toLowerCase());
+    }
+  }
+  if (Array.isArray(payload?.product_ids)) {
+    for (const pid of payload!.product_ids) {
+      if (typeof pid === 'string') productIds.push(pid.toLowerCase());
+    }
+  }
+
+  const findings: Finding[] = [];
+  for (const entry of custom) {
+    if (!entry?.policy_id) continue;
+    const pid = entry.policy_id.toLowerCase();
+    const keywords: string[] = pid.split(/[_\-.]/).filter((k: string) => k.length >= 3);
+    const applies =
+      pid.endsWith('_default') ||
+      pid.endsWith('_all') ||
+      productIds.length === 0 ||
+      keywords.some((kw: string) => productIds.some((pp) => pp.includes(kw)));
+    if (!applies) continue;
+    // `must` enforcement rides as warning (buyer acknowledges to proceed);
+    // `should`/`may` ride as info. `must` becomes critical only if the
+    // buyer's plan payload declares an explicit refusal — outside the
+    // spec's current shape, so no critical path here.
+    const severity: Severity = entry.enforcement === 'must' ? 'warning' : 'info';
+    findings.push({
+      category_id: 'custom_policy',
+      policy_id: entry.policy_id,
+      severity,
+      explanation:
+        entry.policy ??
+        `Plan policy ${entry.policy_id} applies (enforcement: ${entry.enforcement ?? 'may'}).`,
+    });
+  }
+  return findings;
+}
+
 export function verdictFromFindings(findings: Finding[]): GovernanceDecision {
   if (findings.some((f) => f.severity === 'critical')) return 'denied';
   if (findings.some((f) => f.severity === 'warning')) return 'conditions';
