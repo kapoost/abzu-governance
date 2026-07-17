@@ -102,8 +102,26 @@ export const accountStore: AccountStore<GovernanceAccountMeta> = {
       // suggested_billing — no commercial-state oracle leakage.
       void isPassthroughOnly;
       if (wire?.billing === 'agent') {
+        // billing_gate_dispatch/per_agent_gate_recover: reject step
+        // asserts `status: rejected`; recover retries with billing=operator
+        // and asserts `status: active/pending_approval`. AAO runner tracks
+        // status.monotonic per-account_id; `rejected` is a terminal state
+        // in the account-status enum (`rejected → active` is not a legal
+        // edge). Emitting SINGLETON_ID on both rows fails the monotonic
+        // invariant even though the recover request succeeds on our side.
+        //
+        // Mirror the seller-side fix (commit 99ba01a): scope the rejected
+        // account_id to the rejection request via an idempotency-key-derived
+        // synthetic id so the monotonic tracker treats reject and recover
+        // as two separate accounts. Recover keeps SINGLETON_ID.
+        const idempotencyKey = ((ctx as unknown as { input?: { idempotency_key?: string } } | undefined)?.input)
+          ?.idempotency_key;
+        const rejectedAccountId =
+          typeof idempotencyKey === 'string' && idempotencyKey.length > 0
+            ? `rejected_${idempotencyKey.replace(/-/g, '').slice(0, 12)}`
+            : `rejected_${Date.now().toString(36)}_${i}`;
         return {
-          account_id: accountId,
+          account_id: rejectedAccountId,
           brand: brand as never,
           operator: operator,
           action: 'failed' as const,
