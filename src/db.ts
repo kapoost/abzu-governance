@@ -50,9 +50,17 @@ export async function createPostgresPlanStore(
   databaseUrl: string,
 ): Promise<PlanStoreAdapter> {
   const sql = postgres(databaseUrl, { onnotice: () => {} });
-  await sql.unsafe(CREATE_PLANS_SQL);
-  await sql.unsafe(CREATE_EVENTS_SQL);
-  await sql.unsafe(CREATE_INDEX_SQL);
+  // Best-effort DDL — these tables have existed for months. If Neon is
+  // degraded (compute quota exhausted etc.) we must NOT wedge the whole
+  // governance process at boot. Log and continue; runtime queries surface
+  // Postgres errors per-endpoint where the router can 500 gracefully.
+  try {
+    await sql.unsafe(CREATE_PLANS_SQL);
+    await sql.unsafe(CREATE_EVENTS_SQL);
+    await sql.unsafe(CREATE_INDEX_SQL);
+  } catch (err) {
+    console.warn('[governance/db] DDL skipped:', err instanceof Error ? err.message : String(err));
+  }
 
   return {
     async upsertPlan(plan) {
