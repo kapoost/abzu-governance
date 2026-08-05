@@ -12,7 +12,7 @@
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {
-    "@adcp/sdk": "13.0.0-rc.5",
+    "@adcp/sdk": "13.0.0-rc.7",
     "postgres": "^3.4.9",
     "zod": "^4.4.3"
   },
