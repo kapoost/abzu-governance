@@ -44,11 +44,17 @@ export function startHealthzProxy(opts: ProxyOptions): void {
     async fetch(req): Promise<Response> {
       const url = new URL(req.url);
 
-      if (req.method === 'GET' && url.pathname === '/.well-known/healthz') {
-        return Response.json(
+      // HEAD as well as GET. Health checkers commonly probe with HEAD, and
+      // answering it with the 404 that fell through to the proxy's default
+      // branch made this endpoint look down to anything that does. Per
+      // RFC 9110 a HEAD response carries the same headers as the GET and no
+      // body, so the JSON is built once and the body dropped.
+      if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/.well-known/healthz') {
+        const res = Response.json(
           { ok: true, agent: 'abzu-governance', uptime_ms: Date.now() - startedAt },
           { headers: { 'Cache-Control': 'no-store' } },
         );
+        return req.method === 'HEAD' ? new Response(null, { status: res.status, headers: res.headers }) : res;
       }
 
       // MCP webhook receiver — implements the buyer/orchestrator side of the
