@@ -1,0 +1,29 @@
+name: ci
+
+# This repository had no gate at all until 2026-09-16. The cost of that is
+# documented next door: in abzu-orchestrator a test went red, survived a
+# commit editing the same file plus four SDK bumps, and was found by hand
+# four months later — because its workflow carried a monorepo path filter
+# that could never match and therefore never ran.
+#
+# Keep this matching the agent's own scripts. If a script is added or
+# renamed in package.json, add it here too.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
